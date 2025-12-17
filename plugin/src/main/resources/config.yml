@@ -1,0 +1,55 @@
+# PaperMCP Plugin Configuration
+
+server:
+  # WebSocket server host (0.0.0.0 = all interfaces)
+  host: "0.0.0.0"
+
+  # WebSocket server port
+  port: 25577
+
+  # Authentication token - CHANGE THIS!
+  # Generate a secure random token and use the same in the client config
+  authentication_token: "CHANGE_ME_TO_A_SECURE_TOKEN"
+
+  # IP whitelist (optional, empty = allow all)
+  allowed_ips: []
+    # - "your.home.ip.address"
+    # - "10.0.0.0/24"
+
+# MCP Settings
+mcp:
+  security:
+    # Whitelist of commands that can be executed via MCP
+    command_whitelist:
+      - "list"
+      - "tps"
+      - "help"
+      - "plugins"
+      - "version"
+      - "say"
+      - "tell"
+      - "time*"
+      - "weather*"
+      - "gamerule*"
+      - "gamemode"
+      - "tp"
+
+    # Commands that are explicitly blocked
+    command_blacklist:
+      - "stop"
+      - "restart"
+      - "reload"
+      - "*op*"
+      - "perm*"
+      - "ban*"
+      - "pardon*"
+      - "kick"
+      - "whitelist"
+      - "plugin*"
+
+    # Enable audit logging
+    audit_logging: true
+
+  buffers:
+    console_log_size: 1000
+    chat_log_size: 1000

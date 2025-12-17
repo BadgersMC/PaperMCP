@@ -1,0 +1,73 @@
+# PaperMCP Configuration
+
+# MCP Server Settings
+mcp:
+  # Enable/disable the MCP server
+  enabled: true
+
+  # Security settings
+  security:
+    # Whitelist of commands that can be executed via MCP
+    # Empty list = all non-blacklisted commands allowed (NOT RECOMMENDED for production)
+    # Supports wildcards: "time*" matches time, timeset, etc.
+    command_whitelist:
+      # Info commands
+      - "list"
+      - "tps"
+      - "help"
+      - "plugins"
+      - "version"
+
+      # Chat commands
+      - "say"
+      - "tell"
+      - "msg"
+      - "w"
+
+      # World management (use with caution)
+      - "time*"        # time, timeset, etc.
+      - "weather*"     # weather, weatherset, etc.
+      - "gamerule*"    # gamerule commands
+
+      # Player management (use with caution)
+      - "gamemode"
+      - "tp"
+      - "teleport"
+      - "give"
+
+    # Commands that are explicitly blocked (takes priority over whitelist)
+    # Supports wildcards: "*op*" blocks op, deop, operator, etc.
+    command_blacklist:
+      # Server control
+      - "stop"
+      - "restart"
+      - "reload"
+
+      # Permissions (CRITICAL - do not remove)
+      - "*op*"         # Blocks op, deop, operator, etc.
+      - "perm*"        # Blocks permission commands
+
+      # Bans and moderation
+      - "ban*"
+      - "pardon*"
+      - "kick"
+      - "whitelist"
+
+      # Plugin management
+      - "plugin*"
+
+    # Enable audit logging for all MCP operations
+    audit_logging: true
+
+  # Buffer sizes for logs
+  buffers:
+    console_log_size: 1000
+    chat_log_size: 1000
+
+# Logging settings
+logging:
+  # Log level: DEBUG, INFO, WARN, ERROR
+  level: "INFO"
+
+  # Log MCP protocol messages (very verbose)
+  log_protocol_messages: false

@@ -1,0 +1,19 @@
+name: PaperMCP
+version: ${version}
+main: com.badgersmc.papermcp.PaperMCPPlugin
+api-version: 1.21
+description: MCP (Model Context Protocol) server adapter for Paper/Spigot servers - WebSocket edition
+author: BadgersMC
+website: https://github.com/BadgersMC/PaperMCP
+
+commands:
+  papermcp:
+    description: PaperMCP plugin management
+    usage: /papermcp [status|clients|reload|help]
+    permission: papermcp.admin
+    aliases: [pmcp, mcp]
+
+permissions:
+  papermcp.admin:
+    description: Full access to PaperMCP administration
+    default: op

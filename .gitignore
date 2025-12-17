@@ -1,0 +1,48 @@
+# Gradle
+.gradle/
+build/
+out/
+bin/
+.gradle-dist/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Eclipse
+.classpath
+.project
+.settings/
+
+# VSCode
+.vscode/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Logs
+logs/
+*.log
+
+# Configuration files with secrets
+**/config.json
+**/papermcp-client-config.json
+**/*secret*
+**/*password*
+**/.env
+
+# Build artifacts
+*.jar
+!gradle-wrapper.jar
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
