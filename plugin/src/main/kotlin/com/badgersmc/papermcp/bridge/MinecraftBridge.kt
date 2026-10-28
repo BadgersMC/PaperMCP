@@ -10,16 +10,21 @@ private val logger = Logger.getLogger("PaperMCP")
 class MinecraftBridge(private val plugin: PaperMCPPlugin) {
 
     private val chatLogBuffer = ConcurrentLinkedQueue<ChatMessage>()
-    private val maxBufferSize = 1000
     private val serverStartTime = System.currentTimeMillis()
+    private val fileService = ServerFileService(plugin)
 
     init {
         Bukkit.getPluginManager().registerEvents(EventListeners(this), plugin)
         logger.info("MinecraftBridge initialized with event listeners")
     }
 
-    fun getServerInfo(): ServerInfo {
-        return ServerInfo(
+    private fun <T> runSync(action: () -> T): T {
+        if (Bukkit.isPrimaryThread()) return action()
+        return Bukkit.getScheduler().callSyncMethod(plugin) { action() }.get()
+    }
+
+    fun getServerInfo(): ServerInfo = runSync {
+        ServerInfo(
             version = Bukkit.getVersion(),
             bukkitVersion = Bukkit.getBukkitVersion(),
             onlineMode = Bukkit.getOnlineMode(),
@@ -40,8 +45,8 @@ class MinecraftBridge(private val plugin: PaperMCPPlugin) {
         }
     }
 
-    fun getOnlinePlayers(): List<PlayerInfo> {
-        return Bukkit.getOnlinePlayers().map { player ->
+    fun getOnlinePlayers(): List<PlayerInfo> = runSync {
+        Bukkit.getOnlinePlayers().map { player ->
             PlayerInfo(
                 uuid = player.uniqueId.toString(),
                 name = player.name,
@@ -58,13 +63,13 @@ class MinecraftBridge(private val plugin: PaperMCPPlugin) {
         }
     }
 
-    fun getPlayer(nameOrUuid: String): PlayerInfo? {
+    fun getPlayer(nameOrUuid: String): PlayerInfo? = runSync {
         val player = Bukkit.getOnlinePlayers().firstOrNull {
             it.name.equals(nameOrUuid, ignoreCase = true) ||
-            it.uniqueId.toString().equals(nameOrUuid, ignoreCase = true)
-        } ?: return null
+                it.uniqueId.toString().equals(nameOrUuid, ignoreCase = true)
+        } ?: return@runSync null
 
-        return PlayerInfo(
+        PlayerInfo(
             uuid = player.uniqueId.toString(),
             name = player.name,
             health = player.health,
@@ -86,7 +91,15 @@ class MinecraftBridge(private val plugin: PaperMCPPlugin) {
                 return listOf("Log file not found")
             }
 
-            logFile.readLines().takeLast(limit)
+            val safeLimit = limit.coerceAtLeast(1)
+            val tail = ArrayDeque<String>(safeLimit)
+            logFile.bufferedReader().useLines { lines ->
+                lines.forEach { line ->
+                    if (tail.size == safeLimit) tail.removeFirst()
+                    tail.addLast(line)
+                }
+            }
+            tail.toList()
         } catch (e: Exception) {
             logger.severe("Error reading console logs: ${e.message}")
             listOf("Error reading logs: ${e.message}")
@@ -94,6 +107,9 @@ class MinecraftBridge(private val plugin: PaperMCPPlugin) {
     }
 
     fun addChatMessage(player: String, message: String) {
+        val maxBufferSize = plugin.config
+            .getInt("mcp.buffers.chat_log_size", 5000)
+            .coerceIn(100, 100_000)
         chatLogBuffer.add(ChatMessage(System.currentTimeMillis(), player, message))
         while (chatLogBuffer.size > maxBufferSize) {
             chatLogBuffer.poll()
@@ -106,27 +122,14 @@ class MinecraftBridge(private val plugin: PaperMCPPlugin) {
 
     fun executeCommand(command: String): CommandResult {
         return try {
-            // Check if we're on the main thread
-            if (Bukkit.isPrimaryThread()) {
-                // Already on main thread, execute directly
-                val result = Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command.trimStart('/'))
-                CommandResult(
-                    success = result,
-                    command = command,
-                    message = if (result) "Command executed successfully" else "Command execution failed"
-                )
-            } else {
-                // Not on main thread, schedule and wait
-                val result = Bukkit.getScheduler().callSyncMethod(plugin) {
-                    Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command.trimStart('/'))
-                }.get()
-
-                CommandResult(
-                    success = result,
-                    command = command,
-                    message = if (result) "Command executed successfully" else "Command execution failed"
-                )
+            val result = runSync {
+                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command.trimStart('/'))
             }
+            CommandResult(
+                success = result,
+                command = command,
+                message = if (result) "Command executed successfully" else "Command execution failed"
+            )
         } catch (e: Exception) {
             logger.severe("Error executing command: $command - ${e.message}")
             e.printStackTrace()
@@ -139,177 +142,117 @@ class MinecraftBridge(private val plugin: PaperMCPPlugin) {
         }
     }
 
-    fun readFile(path: String, maxLines: Int = 1000): FileReadResult {
+    fun sendMessage(message: String, target: String = "broadcast", prefix: String? = null): MessageResult {
         return try {
-            val file = java.io.File(path)
+            val formattedPrefix = prefix?.let { "§7$it§r " } ?: ""
+            val formattedMessage = "$formattedPrefix$message"
 
-            // Security check: prevent reading files outside server directory
-            val canonicalPath = file.canonicalPath
-            val serverPath = java.io.File(".").canonicalPath
-
-            if (!canonicalPath.startsWith(serverPath)) {
-                return FileReadResult(
-                    success = false,
-                    path = path,
-                    message = "Access denied: Path is outside server directory",
-                    lines = emptyList()
-                )
-            }
-
-            if (!file.exists()) {
-                return FileReadResult(
-                    success = false,
-                    path = path,
-                    message = "File not found",
-                    lines = emptyList()
-                )
-            }
-
-            if (!file.isFile) {
-                return FileReadResult(
-                    success = false,
-                    path = path,
-                    message = "Path is not a file",
-                    lines = emptyList()
-                )
-            }
-
-            if (file.length() > 10 * 1024 * 1024) { // 10MB limit
-                return FileReadResult(
-                    success = false,
-                    path = path,
-                    message = "File too large (>10MB)",
-                    lines = emptyList()
-                )
-            }
-
-            val lines = file.readLines().take(maxLines)
-
-            FileReadResult(
-                success = true,
-                path = canonicalPath,
-                message = "File read successfully (${lines.size} lines)",
-                lines = lines,
-                totalLines = file.readLines().size,
-                truncated = file.readLines().size > maxLines
-            )
-        } catch (e: Exception) {
-            logger.severe("Error reading file: $path - ${e.message}")
-            FileReadResult(
-                success = false,
-                path = path,
-                message = "Error: ${e.message}",
-                lines = emptyList()
-            )
-        }
-    }
-
-    fun editFile(path: String, mode: String, content: String, pattern: String? = null, createBackup: Boolean = true): FileEditResult {
-        return try {
-            val file = java.io.File(path)
-
-            // Security check: prevent editing files outside server directory
-            val canonicalPath = file.canonicalPath
-            val serverPath = java.io.File(".").canonicalPath
-
-            if (!canonicalPath.startsWith(serverPath)) {
-                return FileEditResult(
-                    success = false,
-                    path = path,
-                    message = "Access denied: Path is outside server directory"
-                )
-            }
-
-            // Check file size limit for existing files
-            if (file.exists() && file.isFile && file.length() > 10 * 1024 * 1024) {
-                return FileEditResult(
-                    success = false,
-                    path = path,
-                    message = "File too large (>10MB)"
-                )
-            }
-
-            // Create backup if requested and file exists
-            var backupPath: String? = null
-            if (createBackup && file.exists() && file.isFile) {
-                val backupFile = java.io.File("${file.absolutePath}.backup")
-                file.copyTo(backupFile, overwrite = true)
-                backupPath = backupFile.absolutePath
-            }
-
-            when (mode) {
-                "write" -> {
-                    // Replace entire file
-                    file.parentFile?.mkdirs()
-                    file.writeText(content)
-                    FileEditResult(
-                        success = true,
-                        path = canonicalPath,
-                        message = "File written successfully",
-                        backupPath = backupPath
-                    )
-                }
-                "append" -> {
-                    // Append to file
-                    file.parentFile?.mkdirs()
-                    file.appendText(content)
-                    FileEditResult(
-                        success = true,
-                        path = canonicalPath,
-                        message = "Content appended successfully",
-                        backupPath = backupPath
-                    )
-                }
-                "replace" -> {
-                    // Find and replace pattern
-                    if (pattern.isNullOrBlank()) {
-                        return FileEditResult(
-                            success = false,
-                            path = path,
-                            message = "Pattern is required for replace mode"
+            runSync {
+                when (target) {
+                    "broadcast", "all", "*" -> {
+                        Bukkit.broadcastMessage(formattedMessage)
+                        MessageResult(
+                            success = true,
+                            target = "broadcast",
+                            recipients = Bukkit.getOnlinePlayers().size,
+                            message = formattedMessage
                         )
                     }
+                    else -> {
+                        val player = Bukkit.getOnlinePlayers().firstOrNull {
+                            it.name.equals(target, ignoreCase = true)
+                        }
 
-                    if (!file.exists()) {
-                        return FileEditResult(
-                            success = false,
-                            path = path,
-                            message = "File not found"
-                        )
+                        if (player == null) {
+                            MessageResult(
+                                success = false,
+                                target = target,
+                                recipients = 0,
+                                message = formattedMessage,
+                                error = "Player not found: $target"
+                            )
+                        } else {
+                            player.sendMessage(formattedMessage)
+                            MessageResult(
+                                success = true,
+                                target = player.name,
+                                recipients = 1,
+                                message = formattedMessage
+                            )
+                        }
                     }
-
-                    val originalContent = file.readText()
-                    val newContent = originalContent.replace(pattern, content)
-                    val replacements = (originalContent.length - newContent.length) / (pattern.length - content.length)
-
-                    file.writeText(newContent)
-
-                    FileEditResult(
-                        success = true,
-                        path = canonicalPath,
-                        message = "Replaced $replacements occurrence(s)",
-                        backupPath = backupPath,
-                        replacements = replacements
-                    )
-                }
-                else -> {
-                    FileEditResult(
-                        success = false,
-                        path = path,
-                        message = "Invalid mode: $mode (must be 'write', 'append', or 'replace')"
-                    )
                 }
             }
         } catch (e: Exception) {
-            logger.severe("Error editing file: $path - ${e.message}")
+            logger.severe("Error sending message: ${e.message}")
             e.printStackTrace()
-            FileEditResult(
+            MessageResult(
                 success = false,
-                path = path,
-                message = "Error: ${e.message}"
+                target = target,
+                recipients = 0,
+                message = message,
+                error = "Error: ${e.message}"
             )
         }
     }
+
+    fun readFile(path: String, maxLines: Int = 1000): FileReadResult =
+        fileService.readFile(path, maxLines)
+
+    fun readFileRange(path: String, startLine: Int, maxLines: Int): FileReadResult =
+        fileService.readFileRange(path, startLine, maxLines)
+
+    fun listDirectory(path: String, depth: Int, maxEntries: Int): Map<String, Any?> =
+        fileService.listDirectory(path, depth, maxEntries)
+
+    fun fileStat(path: String): Map<String, Any?> =
+        fileService.stat(path)
+
+    fun batchReadFiles(paths: List<String>, startLine: Int, maxLinesPerFile: Int): Map<String, Any?> =
+        fileService.batchRead(paths, startLine, maxLinesPerFile)
+
+    fun hashFile(path: String, algorithm: String): Map<String, Any?> =
+        fileService.hash(path, algorithm)
+
+    fun downloadFileChunk(path: String, offset: Long, maxBytes: Int): Map<String, Any?> =
+        fileService.downloadChunk(path, offset, maxBytes)
+
+    fun searchFiles(
+        rootPath: String,
+        query: String,
+        fileGlob: String,
+        regex: Boolean,
+        caseSensitive: Boolean,
+        maxResults: Int
+    ): Map<String, Any?> =
+        fileService.search(rootPath, query, fileGlob, regex, caseSensitive, maxResults)
+
+    fun editFile(
+        path: String,
+        mode: String,
+        content: String,
+        pattern: String? = null,
+        createBackup: Boolean = true
+    ): FileEditResult =
+        fileService.editFile(path, mode, content, pattern, createBackup)
+
+    fun copyFile(source: String, destination: String, overwrite: Boolean): Map<String, Any?> =
+        fileService.copy(source, destination, overwrite)
+
+    fun moveFile(source: String, destination: String, overwrite: Boolean): Map<String, Any?> =
+        fileService.move(source, destination, overwrite)
+
+    fun uploadFileChunk(
+        path: String,
+        dataBase64: String,
+        offset: Long,
+        truncate: Boolean,
+        createBackup: Boolean
+    ): Map<String, Any?> =
+        fileService.uploadChunk(path, dataBase64, offset, truncate, createBackup)
+
+    fun deleteFile(path: String, recursive: Boolean): Map<String, Any?> =
+        fileService.delete(path, recursive)
 }
 
 data class ServerInfo(
@@ -349,6 +292,14 @@ data class ChatMessage(
 data class CommandResult(
     val success: Boolean,
     val command: String,
+    val message: String,
+    val error: String? = null
+)
+
+data class MessageResult(
+    val success: Boolean,
+    val target: String,
+    val recipients: Int,
     val message: String,
     val error: String? = null
 )

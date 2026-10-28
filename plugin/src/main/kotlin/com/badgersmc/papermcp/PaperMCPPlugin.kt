@@ -11,16 +11,35 @@ class PaperMCPPlugin : JavaPlugin() {
     private lateinit var minecraftBridge: MinecraftBridge
     private lateinit var webSocketServer: WebSocketServer
 
+    @Volatile
+    private var maintenanceMode: Boolean = false
+
+    fun isMaintenanceMode(): Boolean = maintenanceMode
+
+    private fun setMaintenanceMode(enabled: Boolean) {
+        maintenanceMode = enabled
+        logger.warning("PaperMCP maintenance mode ${if (enabled) "ENABLED" else "disabled"}")
+    }
+
     override fun onEnable() {
         logger.info("Enabling PaperMCP v${description.version}...")
 
         // Save default config
         saveDefaultConfig()
 
+        maintenanceMode = config.getBoolean("mcp.security.maintenance_mode", false)
+        if (maintenanceMode) {
+            logger.warning("PaperMCP started with maintenance mode ENABLED")
+        }
+
         // Validate authentication token
         val authToken = config.getString("server.authentication_token")
-        if (authToken.isNullOrBlank() || authToken == "CHANGE_ME_TO_A_SECURE_TOKEN") {
-            logger.severe("SECURITY WARNING: Please set a secure authentication_token in config.yml!")
+        if (
+            authToken.isNullOrBlank() ||
+            authToken == "CHANGE_ME_TO_A_SECURE_TOKEN" ||
+            authToken.length < 32
+        ) {
+            logger.severe("SECURITY WARNING: Set authentication_token to a random secret of at least 32 characters.")
             logger.severe("Plugin will not start without a valid token.")
             server.pluginManager.disablePlugin(this)
             return
@@ -75,6 +94,7 @@ class PaperMCPPlugin : JavaPlugin() {
                 sender.sendMessage("§7/papermcp status - Show WebSocket server status")
                 sender.sendMessage("§7/papermcp clients - List connected clients")
                 sender.sendMessage("§7/papermcp reload - Reload configuration")
+                sender.sendMessage("§7/papermcp maintenance <on|off|status> - Toggle maintenance mode")
                 sender.sendMessage("§7/papermcp help - Show this help")
                 return true
             }
@@ -89,6 +109,7 @@ class PaperMCPPlugin : JavaPlugin() {
                     sender.sendMessage("§7WebSocket Server Status: $status")
                     sender.sendMessage("§7Connected Clients: ${if (::webSocketServer.isInitialized) webSocketServer.connectedClients else 0}")
                     sender.sendMessage("§7Listening on: ${config.getString("server.host")}:${config.getInt("server.port")}")
+                    sender.sendMessage("§7Maintenance Mode: ${if (maintenanceMode) "§eENABLED" else "§aDisabled"}")
                 }
                 "clients" -> {
                     if (::webSocketServer.isInitialized) {
@@ -103,8 +124,26 @@ class PaperMCPPlugin : JavaPlugin() {
                 }
                 "reload" -> {
                     reloadConfig()
+                    maintenanceMode = config.getBoolean("mcp.security.maintenance_mode", false)
                     sender.sendMessage("§aConfiguration reloaded!")
-                    sender.sendMessage("§eNote: WebSocket server restart required for changes to take effect")
+                    sender.sendMessage("§7Maintenance Mode: ${if (maintenanceMode) "§eENABLED" else "§aDisabled"}")
+                    sender.sendMessage("§eNote: WebSocket listener settings require a plugin/server restart")
+                }
+                "maintenance" -> {
+                    when (args.getOrNull(1)?.lowercase()) {
+                        "on", "enable", "enabled" -> {
+                            setMaintenanceMode(true)
+                            sender.sendMessage("§ePaperMCP maintenance mode enabled.")
+                        }
+                        "off", "disable", "disabled" -> {
+                            setMaintenanceMode(false)
+                            sender.sendMessage("§aPaperMCP maintenance mode disabled.")
+                        }
+                        "status", null -> {
+                            sender.sendMessage("§7Maintenance Mode: ${if (maintenanceMode) "§eENABLED" else "§aDisabled"}")
+                        }
+                        else -> sender.sendMessage("§cUsage: /papermcp maintenance <on|off|status>")
+                    }
                 }
                 "help" -> {
                     sender.sendMessage("§7=== PaperMCP Help ===")
@@ -127,8 +166,15 @@ class PaperMCPPlugin : JavaPlugin() {
         alias: String,
         args: Array<out String>
     ): List<String>? {
-        if (command.name.equals("papermcp", ignoreCase = true) && args.size == 1) {
-            return listOf("status", "clients", "reload", "help").filter { it.startsWith(args[0].lowercase()) }
+        if (!command.name.equals("papermcp", ignoreCase = true)) return null
+
+        if (args.size == 1) {
+            return listOf("status", "clients", "reload", "maintenance", "help")
+                .filter { it.startsWith(args[0].lowercase()) }
+        }
+        if (args.size == 2 && args[0].equals("maintenance", ignoreCase = true)) {
+            return listOf("on", "off", "status")
+                .filter { it.startsWith(args[1].lowercase()) }
         }
         return null
     }

@@ -42,11 +42,13 @@ PaperMCP enables AI assistants like Claude to monitor and manage your Minecraft 
 - Teleport players
 
 ### Security
-- Token-based authentication
-- Command whitelist/blacklist with wildcards
-- Audit logging
-- IP whitelisting (optional)
-- Encrypted WebSocket connections (WSS)
+- Token-based authentication with constant-time comparison
+- Enforced exact-IP and CIDR connection allowlist
+- Normal and maintenance access modes
+- Command allowlist/denylist with legacy wildcard hardening
+- Server-root file sandbox with path allow/deny rules
+- Sensitive-file deny rules, mutation backups, and audit logging
+- Encrypted WebSocket connections through a TLS reverse proxy when required
 
 ## Quick Start
 
@@ -65,22 +67,41 @@ scp plugin/build/libs/PaperMCP-Plugin-1.0.0-SNAPSHOT.jar user@yourserver:/path/t
 server:
   host: "0.0.0.0"         # Listen on all interfaces
   port: 25577              # WebSocket port
+  max_websocket_message_bytes: 8388608
   authentication_token: "your-super-secret-token-here"  # CHANGE THIS!
+  allowed_ips:
+    - "203.0.113.10"       # Exact IP or CIDR; do not leave empty on production
 
 mcp:
   security:
+    maintenance_mode: false
+    allow_command_wildcards: false  # legacy "name*" entries safely downgrade to exact "name"
+
     command_whitelist:
       - "list"
       - "tps"
-      - "time*"
-      - "weather*"
-      # Add more as needed
+      - "time"
+      - "weather"
+
+    maintenance_command_whitelist:
+      - "spark"
+      - "lg"
+      - "lumaguilds"
+      - "nexo"
+      - "geyser"
 
     command_blacklist:
       - "stop"
-      - "*op*"
-      - "ban*"
-      # Blocks dangerous commands
+      - "restart"
+      - "reload"
+      - "op"
+      - "deop"
+
+    files:
+      read: true
+      write: true     # still requires maintenance_mode
+      upload: true    # still requires maintenance_mode
+      delete: false
 ```
 
 **Open Firewall Port:**
@@ -180,6 +201,21 @@ Send messages to players
 ```
 AI: "Announce that the server will restart in 10 minutes"
 ```
+
+### File inspection and maintenance tools
+PaperMCP also exposes:
+- `minecraft_list_directory` and `minecraft_file_stat`
+- `minecraft_read_file`, `minecraft_read_file_range`, and `minecraft_batch_read_files`
+- `minecraft_search_files` and `minecraft_file_hash`
+- `minecraft_download_file` for chunked binary/database retrieval
+- `minecraft_edit_file`, `minecraft_copy_file`, and `minecraft_move_file`
+- `minecraft_upload_file` for chunked JAR/ZIP/mcpack transfer
+- `minecraft_delete_file` (disabled by default)
+
+Read operations follow the configured server-root path policy. Mutating operations additionally require
+PaperMCP maintenance mode; deletion requires its own explicit configuration switch. The live
+`/papermcp maintenance on` toggle is intentionally ephemeral and resets to the configured
+`maintenance_mode` value after a config reload or server restart.
 
 ## Use Cases
 
@@ -291,6 +327,7 @@ Then use `wss://mc.yourdomain.com` in client config.
 - `/papermcp status` - Show WebSocket server status
 - `/papermcp clients` - List connected clients
 - `/papermcp reload` - Reload configuration
+- `/papermcp maintenance <on|off|status>` - Control the file-mutation/maintenance gate
 - `/papermcp help` - Show help
 
 ### Client (Command Line)

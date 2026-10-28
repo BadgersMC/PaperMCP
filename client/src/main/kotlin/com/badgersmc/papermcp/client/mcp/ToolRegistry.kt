@@ -17,7 +17,18 @@ class ToolRegistry {
         register(ExecuteCommandTool())
         register(SendMessageTool())
         register(ReadFileTool())
+        register(ReadFileRangeTool())
+        register(ListDirectoryTool())
+        register(FileStatTool())
+        register(BatchReadFilesTool())
+        register(SearchFilesTool())
+        register(FileHashTool())
+        register(DownloadFileTool())
         register(EditFileTool())
+        register(CopyFileTool())
+        register(MoveFileTool())
+        register(UploadFileTool())
+        register(DeleteFileTool())
     }
 
     private fun register(tool: MCPTool) {
@@ -96,7 +107,7 @@ class ReadConsoleTool : MCPTool {
             add("properties", JsonObject().apply {
                 add("limit", JsonObject().apply {
                     addProperty("type", "integer")
-                    addProperty("description", "Maximum number of log lines (default: 100, max: 1000)")
+                    addProperty("description", "Maximum number of log lines (default: 100, capped by server mcp.buffers.console_log_size)")
                     addProperty("default", 100)
                 })
             })
@@ -120,7 +131,7 @@ class ReadChatTool : MCPTool {
             add("properties", JsonObject().apply {
                 add("limit", JsonObject().apply {
                     addProperty("type", "integer")
-                    addProperty("description", "Maximum number of chat messages (default: 50, max: 500)")
+                    addProperty("description", "Maximum number of chat messages (default: 50, capped by server mcp.buffers.chat_log_size)")
                 })
                 add("player", JsonObject().apply {
                     addProperty("type", "string")
@@ -201,7 +212,7 @@ class ReadFileTool : MCPTool {
 
     override val definition = ToolDefinition(
         name = name,
-        description = "Read any file from the Minecraft server directory (configs, logs, world data, etc.). Restricted to server directory for security.",
+        description = "Read an allowed text file from the Minecraft server. Path policy, size limits, and secret-file deny rules are enforced server-side.",
         inputSchema = JsonObject().apply {
             addProperty("type", "object")
             add("properties", JsonObject().apply {
@@ -232,7 +243,7 @@ class EditFileTool : MCPTool {
 
     override val definition = ToolDefinition(
         name = name,
-        description = "Edit files on the Minecraft server. Supports write (replace entire file), append, and find/replace. Creates automatic backups. Restricted to server directory for security.",
+        description = "Edit an allowed text file using write, append, or find/replace. Requires PaperMCP maintenance mode and server-side file-write permission; backups are enabled by policy.",
         inputSchema = JsonObject().apply {
             addProperty("type", "object")
             add("properties", JsonObject().apply {
