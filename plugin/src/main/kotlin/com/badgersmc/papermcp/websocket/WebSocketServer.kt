@@ -2,12 +2,15 @@ package com.badgersmc.papermcp.websocket
 
 import com.badgersmc.papermcp.PaperMCPPlugin
 import com.badgersmc.papermcp.bridge.MinecraftBridge
+import com.badgersmc.papermcp.security.IpAllowlist
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import io.javalin.Javalin
 import io.javalin.websocket.WsContext
 import org.bukkit.Bukkit
+import java.net.InetSocketAddress
+import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.logging.Logger
@@ -35,6 +38,12 @@ class WebSocketServer(
         val port = plugin.config.getInt("server.port", 25577)
 
         logger.info("Starting WebSocket server on $host:$port...")
+        val allowedIps = plugin.config.getStringList("server.allowed_ips")
+        if (allowedIps.isEmpty()) {
+            logger.warning("PaperMCP IP allowlist is empty; any network peer with the token can connect")
+        } else {
+            logger.info("PaperMCP IP allowlist enabled with ${allowedIps.size} rule(s)")
+        }
 
         // Start Javalin server on a separate thread to avoid blocking Minecraft main thread
         Thread {
@@ -43,8 +52,11 @@ class WebSocketServer(
                     config.showJavalinBanner = false
                 }.ws("/") { ws ->
                     ws.onConnect { ctx ->
-                        // Configure idle timeout for this connection
+                        // Configure connection limits before accepting requests.
                         ctx.session.idleTimeout = java.time.Duration.ofHours(1)
+                        ctx.session.maxTextMessageSize = plugin.config
+                            .getLong("server.max_websocket_message_bytes", 8L * 1024L * 1024L)
+                            .coerceIn(64L * 1024L, 16L * 1024L * 1024L)
                         handleConnect(ctx)
                     }
                     ws.onMessage { ctx ->
@@ -91,16 +103,32 @@ class WebSocketServer(
 
     private fun handleConnect(ctx: WsContext) {
         val clientId = ctx.sessionId
-        logger.info("Client connecting: $clientId from ${ctx.host()}")
+        val remoteAddress = (ctx.session.remoteAddress as? InetSocketAddress)
+            ?.address
+            ?.hostAddress
+        val allowedIps = plugin.config.getStringList("server.allowed_ips")
 
+        if (remoteAddress == null) {
+            if (allowedIps.isNotEmpty()) {
+                logger.warning("Rejected PaperMCP connection because the peer IP could not be resolved")
+                ctx.session.close()
+                return
+            }
+        } else if (!IpAllowlist.isAllowed(remoteAddress, allowedIps)) {
+            logger.warning("Rejected PaperMCP connection from disallowed IP: $remoteAddress")
+            ctx.session.close()
+            return
+        }
+
+        val auditedAddress = remoteAddress ?: "unknown"
+        logger.info("Client connecting: $clientId from $auditedAddress")
         clients[clientId] = ClientInfo(
             id = clientId,
-            remoteAddress = ctx.host(),
+            remoteAddress = auditedAddress,
             connectedAt = System.currentTimeMillis(),
             authenticated = false
         )
 
-        // Client must authenticate first
         logger.fine("Client $clientId awaiting authentication")
     }
 
@@ -143,7 +171,7 @@ class WebSocketServer(
         val token = request.get("token")?.asString
         val expectedToken = plugin.config.getString("server.authentication_token")
 
-        if (token == expectedToken) {
+        if (tokensMatch(token, expectedToken)) {
             clients[clientId] = clients[clientId]!!.copy(authenticated = true)
             logger.info("Client $clientId authenticated successfully")
 
@@ -161,6 +189,14 @@ class WebSocketServer(
             )))
             ctx.session.close()
         }
+    }
+
+    private fun tokensMatch(provided: String?, expected: String?): Boolean {
+        if (provided == null || expected == null) return false
+        return MessageDigest.isEqual(
+            provided.toByteArray(Charsets.UTF_8),
+            expected.toByteArray(Charsets.UTF_8)
+        )
     }
 
     private fun handleDisconnect(ctx: WsContext) {

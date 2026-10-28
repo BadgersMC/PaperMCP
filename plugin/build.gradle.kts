@@ -27,6 +27,9 @@ dependencies {
     // WebSocket server
     implementation("io.javalin:javalin:5.6.3")
     implementation("org.eclipse.jetty.websocket:websocket-jetty-server:11.0.15")
+
+    testImplementation(kotlin("test-junit5"))
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 java {
@@ -38,6 +41,10 @@ kotlin {
 }
 
 tasks {
+    test {
+        useJUnitPlatform()
+    }
+
     shadowJar {
         archiveClassifier.set("")
         archiveFileName.set("PaperMCP-Plugin-${project.version}.jar")

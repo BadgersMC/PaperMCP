@@ -3,23 +3,31 @@
 server:
   # WebSocket server host (0.0.0.0 = all interfaces)
   host: "0.0.0.0"
-
-  # WebSocket server port
   port: 25577
 
-  # Authentication token - CHANGE THIS!
-  # Generate a secure random token and use the same in the client config
+  # Allows ~4 MiB base64 upload chunks plus JSON overhead.
+  max_websocket_message_bytes: 8388608
+
+  # Generate a unique random secret (minimum 32 characters) for every deployment.
   authentication_token: "CHANGE_ME_TO_A_SECURE_TOKEN"
 
-  # IP whitelist (optional, empty = allow all)
+  # Empty = allow all network peers. Exact IPs and IPv4/IPv6 CIDR are supported.
+  # Production deployments should populate this list.
   allowed_ips: []
-    # - "your.home.ip.address"
+    # - "203.0.113.10"
     # - "10.0.0.0/24"
 
-# MCP Settings
 mcp:
   security:
-    # Whitelist of commands that can be executed via MCP
+    # File mutation and maintenance-only command access require this mode.
+    # Toggle live with /papermcp maintenance on|off.
+    maintenance_mode: false
+
+    # Legacy suffix wildcards such as "g*" are treated as the exact command "g"
+    # unless this is true. Blacklist wildcards are always honored.
+    allow_command_wildcards: false
+
+    # Commands available in both normal and maintenance modes.
     command_whitelist:
       - "list"
       - "tps"
@@ -28,28 +36,91 @@ mcp:
       - "version"
       - "say"
       - "tell"
-      - "time*"
-      - "weather*"
-      - "gamerule*"
+      - "tellraw"
+      - "time"
+      - "weather"
+      - "gamerule"
       - "gamemode"
       - "tp"
+      - "mute"
 
-    # Commands that are explicitly blocked
+    # Extra commands enabled only while maintenance_mode is true.
+    maintenance_command_whitelist:
+      - "spark"
+      - "g"
+      - "guild"
+      - "lg"
+      - "lumaguilds"
+      - "nexo"
+      - "geyser"
+      - "floodgate"
+      - "viaversion"
+
+    # Always evaluated before either whitelist.
     command_blacklist:
       - "stop"
       - "restart"
       - "reload"
-      - "*op*"
+      - "op"
+      - "deop"
       - "perm*"
+      - "lp"
+      - "luckperms"
       - "ban*"
       - "pardon*"
       - "kick"
       - "whitelist"
-      - "plugin*"
+      - "plugman*"
 
-    # Enable audit logging
     audit_logging: true
 
+    files:
+      # Reads are available in normal mode.
+      read: true
+
+      # Writes/uploads are additionally gated by maintenance_mode.
+      write: true
+      upload: true
+
+      # Destructive deletion requires maintenance mode plus explicit switches.
+      delete: false
+      delete_directories: false
+      backups: true
+
+      # Server-relative allowlist. Keep root access limited to known config files.
+      allowed_paths:
+        - "."
+        - "server.properties"
+        - "paper*.yml"
+        - "bukkit.yml"
+        - "spigot.yml"
+        - "plugins/**"
+        - "logs/**"
+        - "config/**"
+
+      # Deny rules override allowed_paths.
+      denied_paths:
+        - ".env"
+        - "**/.env"
+        - "**/*.key"
+        - "**/*.pem"
+        - "**/*.p12"
+        - "**/*.pfx"
+        - "**/secrets/**"
+        - "**/.ssh/**"
+        - "plugins/PaperMCP/config.yml*"
+
+      max_read_bytes: 52428800
+      max_write_bytes: 52428800
+      max_upload_chunk_bytes: 4194304
+      max_download_chunk_bytes: 1048576
+      max_search_file_bytes: 2097152
+      max_search_results: 500
+      max_search_files: 5000
+      max_batch_files: 100
+      max_batch_total_lines: 10000
+      max_list_entries: 2000
+
   buffers:
-    console_log_size: 1000
-    chat_log_size: 1000
+    console_log_size: 10000
+    chat_log_size: 5000
